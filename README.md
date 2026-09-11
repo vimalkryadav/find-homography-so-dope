@@ -19,6 +19,7 @@ The competition brief is in [COMPETITION.md](COMPETITION.md).
 | v11 | ECC accepted on a photometric test | 99.37509 | 98.23892 |
 | v12 | ECC accepted on inlier agreement | 99.37509 | 99.00346 |
 | v13 | inlier-residual tolerance at 1.7x | 99.28112 | 99.05830 |
+| v14 | refine edges before composing | 99.28111 | not submitted |
 
 ## Approach
 
@@ -46,6 +47,13 @@ corner to `w ~= -0.1`, past the horizon, and the metric divides by that `w`. A
 homography matching ground truth to four decimal places still scores 0.179 on that
 pair, because four of its five points are near-perfect and one is amplified about
 a hundredfold. That single pair was 42% of all remaining training error before ECC.
+
+Only one pair in the test set has that signature: `scene_023_1_6`, at min|w| =
+0.1001 against `scene_010_1_5`'s 0.1085. It is reachable only through image 5,
+and every version that tried to improve it moved it toward the same wrong basin.
+v11 differed from v5 almost only there and scored 0.85 lower, which over 60 pairs
+is about 0.102 of total error against a displacement of 0.1075 - arithmetic that
+only works if the v5 answer is already close to correct.
 
 The same sensitivity makes geometric gates misleading: judging a refinement by how
 far the reference corners moved rejects exactly the pairs that need it most.
