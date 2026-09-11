@@ -4,3 +4,4 @@ comp.zip
 .playwright-mcp/
 __pycache__/
 *.pyc
+data/
