@@ -20,6 +20,7 @@ The competition brief is in [COMPETITION.md](COMPETITION.md).
 | v12 | ECC accepted on inlier agreement | 99.37509 | 99.00346 |
 | v13 | inlier-residual tolerance at 1.7x | 99.28112 | 99.05830 |
 | v14 | refine edges before composing | 99.28111 | not submitted |
+| v15 | dense matching in the weak-inlier band | **99.42418** | pending |
 
 ## Approach
 
@@ -59,6 +60,22 @@ The same sensitivity makes geometric gates misleading: judging a refinement by h
 far the reference corners moved rejects exactly the pairs that need it most.
 Measuring the residual on the matched inliers instead, where the features actually
 are, separates a correct near-horizon correction from a photometric slide.
+
+## Dense matching
+
+`dense_matcher.py` runs LoFTR and is used only where the sparse matcher thins out,
+between 30 and 200 inliers. Outside that band it does not earn its place: above it
+the sparse fit is more precise, and below it the pair is hard enough that the dense
+matcher fails too (scene_033 returns 8 matches and a useless homography). Raising
+its input resolution does not help, since the model is trained near 840px and
+degrades on either side.
+
+Its answers are deliberately left unpolished. Photometric refinement pulls them
+back to the sparse answer, which for exactly these pairs is the worse one:
+scene_006_1_6 goes 0.0151 dense, 0.0287 after ECC, 0.0548 sparse.
+
+The import is optional. Without torch and kornia installed, `solution_v15.py`
+falls back to the sparse path and reproduces v13 exactly.
 
 ## Layout
 
