@@ -1,153 +1,84 @@
 # Find Homography So Dope
 
-Predict the homography that maps Image 1 onto Image 2 for each given pair.
+Estimating the 3x3 homography mapping image 1 onto image 2 for each pair in a set
+of 6-image scenes. Scored on mean reprojection error of five reference points
+(four corners and the centre), reported on a 0-100 scale where higher is better.
 
-## Objective
+The competition brief is in [COMPETITION.md](COMPETITION.md).
 
-Given a pair of images, predict the 3x3 homography matrix that maps
-**Image 1 -> Image 2**. Any approach is allowed: classical (SIFT/ORB +
-matching + RANSAC), learned (CNN/ResNet), hybrid, or pretrained/generative
-models. Two things are scored:
+## Results
 
-1. **Homography prediction quality** (main leaderboard metric)
-2. **Inference runtime** (measured separately, not self-reported)
+| version | approach | train | public |
+|---|---|---|---|
+| v5  | identity snap, chained composition, guided re-match | 98.48291 | **99.09285** |
+| v6  | route consensus | 98.29446 | not submitted |
+| v7  | consensus as veto | 98.43596 | not submitted |
+| v8b | scene-graph bundle refinement | 98.72668 | 98.81967 |
+| v9  | bundle gated on evidence strength | 98.52132 | not submitted |
+| v10 | ECC photometric refinement | 98.86413 | not submitted |
+| v11 | ECC accepted on a photometric test | 99.37509 | 98.23892 |
+| v12 | ECC accepted on inlier agreement | 99.37509 | 99.00346 |
+| v13 | inlier-residual tolerance at 1.7x | 99.28112 | 99.05830 |
 
-## Dataset
+## Approach
 
-A curated subset of image sequences, split so that **entire sequences** go to
-either train or test (no leakage between near-duplicate images from the same
-scene).
+Half the scenes are illumination-only, where the true homography is exactly
+identity. Classifying at the scene level rather than per pair separated all 28
+training scenes with a wide margin and lets a scene's one bad pair be overridden
+by its four good ones.
+
+For the rest, transform magnitude grows with image index, so a 1 -> k pair too
+wide to match directly can be recovered by composing shorter hops through
+intermediate images. Inlier count decides between the direct edge and a chained
+path.
+
+Everything through v9 estimates the homography from sparse keypoints, so all of
+it inherits SIFT's half-pixel localisation error no matter how the routes are
+selected. That is why route selection, consensus and bundle adjustment all landed
+within noise of each other. ECC refinement attacks the floor instead, aligning on
+pixel intensities across the whole overlap, and is invariant to affine
+illumination change.
+
+## What the metric rewards
+
+The scoring is unusually sensitive on wide-baseline pairs. `scene_010_1_5` maps a
+corner to `w ~= -0.1`, past the horizon, and the metric divides by that `w`. A
+homography matching ground truth to four decimal places still scores 0.179 on that
+pair, because four of its five points are near-perfect and one is amplified about
+a hundredfold. That single pair was 42% of all remaining training error before ECC.
+
+The same sensitivity makes geometric gates misleading: judging a refinement by how
+far the reference corners moved rejects exactly the pairs that need it most.
+Measuring the residual on the matched inliers instead, where the features actually
+are, separates a correct near-horizon correction from a photometric slide.
+
+## Layout
 
 ```
-data/
-    train/<scene_id>/*.png
-    test/<scene_id>/*.png
+solution.py          v5, the best public score
+solution_v6..v13.py  the versions above, in order
+out/                 submissions and per-version training predictions
+evaluate.py          scoring, matching the competition metric
+run_predict.py       runs a predict() module over a pairs csv
+validate_submission.py
+benchmark.py         runtime measurement
 ```
 
-Each sequence has 6 images; pairs are formed as (1, k) for k = 2..6, with
-image 1 as the reference (Image 1 in each pair). Scene ids are anonymized
-sequential labels — don't read anything into the numbering.
+Image data is not tracked here; see the competition page for the dataset.
 
-## Input / Output
-
-**train.csv**
-```
-pair_id,image_1,image_2,h11,h12,h13,h21,h22,h23,h31,h32
-```
-
-**test.csv**
-```
-pair_id,image_1,image_2
-```
-
-**sample_submission.csv** / your submission:
-```
-pair_id,h11,h12,h13,h21,h22,h23,h31,h32
-```
-
-`h33` is assumed to be `1` (standard homography normalization).
-
-## Homography definition
-
-For a point `(x1, y1)` in Image 1 (pixel coordinates), the homography H maps
-it to a point `(x2, y2)` in Image 2 via:
+## Reproducing
 
 ```
-[x2']   [h11 h12 h13] [x1]
-[y2'] = [h21 h22 h23] [y1]
-[w2']   [h31 h32   1] [ 1]
-
-x2 = x2' / w2'
-y2 = y2' / w2'
+python run_predict.py --module solution.py --pairs test.csv \
+    --data_dir data/test --out out/submission.csv
+python validate_submission.py --submission out/submission.csv --test test.csv
 ```
 
-## Evaluation metric
+Self-check against the training ground truth:
 
-We do **not** compare matrices element-by-element (H is only defined up to
-scale, and small element errors can mean very different amounts of visual
-misalignment). Instead we use **geometric reprojection error**:
-
-For every test pair:
-1. Take 5 normalized points in Image 1: `(0,0), (1,0), (1,1), (0,1), (0.5,0.5)`.
-2. Convert to pixel coordinates using Image 1's dimensions.
-3. Warp with the predicted H and with the hidden ground-truth H.
-4. Convert both warped points to normalized coordinates in Image 2.
-5. Compute the Euclidean distance between the predicted and ground-truth
-   normalized points, for each of the 5 points, and average.
-
-The competition score is the **mean reprojection error across all test
-pairs** (lower is better).
-
-**Note:** the Kaggle leaderboard itself displays this as a *Homography Match
-Score* on a 0-100 scale (`100 * max(0, 1 - error / 0.2)`), so **higher is
-better** there — same ranking, just inverted for display. `evaluate.py`
-(below) reports both the raw, lower-is-better error and this same 0-100
-`leaderboard_score`, so your local self-check matches what you'll see on
-Kaggle.
-
-Run it yourself with:
 ```
-python evaluate.py --predictions predictions.csv --ground_truth ground_truth.csv
+python run_predict.py --module solution.py --pairs train.csv \
+    --data_dir data/train --out out/train.csv
+python evaluate.py --predictions out/train.csv --ground_truth train.csv \
+    --data_dir data/train
 ```
-
-You can self-check locally on your own training pairs (which include the ground-truth
-H) before submitting, by pointing `--ground_truth` at `train.csv` and adding `--data_dir`
-so image dimensions can be read from disk (train.csv has no width/height columns):
-```
-python evaluate.py --predictions train_predictions.csv --ground_truth train.csv --data_dir data/train
-```
-
-## Submission format
-
-Submit a single `submission.csv`:
-```
-pair_id,h11,h12,h13,h21,h22,h23,h31,h32
-```
-
-Validate before submitting:
-```
-python validate_submission.py --submission submission.csv --test test.csv
-```
-
-**Naming convention:** Kaggle identifies a submission by your logged-in account, not by
-the uploaded file's name — you can upload a file called `submission.csv` regardless of
-what it was named on your machine. For grading, you will also be asked to send a copy of
-your exact submission named `<roll_number>_submission.csv` (e.g. `CS21B001_submission.csv`)
-through whatever channel your instructor specifies.
-
-## Runtime measurement
-
-Runtime is **not** self-reported — it's benchmarked on the same machine for every student
-after the deadline, using:
-```
-python benchmark.py --module your_script.py --test test.csv --data_dir data/test
-```
-
-Your script must expose:
-```python
-def predict(image_1_path: str, image_2_path: str) -> np.ndarray:
-    ...  # returns a 3x3 homography, Image 1 -> Image 2
-```
-
-Runtime includes image loading, preprocessing, feature extraction/model
-inference, matching, and homography estimation. It does **not** include
-model training. You can and should run this yourself beforehand to check
-your own runtime — it uses `time.perf_counter()` with a short warm-up before
-timing, the same way it'll be measured officially.
-
-## Baselines
-
-- `baseline_sift.py` — SIFT -> BFMatcher -> Lowe ratio test -> RANSAC -> Homography
-- `baseline_orb.py` — ORB -> BFMatcher (Hamming) -> Lowe ratio test -> RANSAC -> Homography (optional second baseline)
-
-## Allowed methods
-
-Anything: SIFT, ORB, BFMatcher, FLANN, CNN/ResNet, hybrid approaches,
-pretrained models, generative models. No restrictions beyond producing a
-valid `submission.csv`.
-
-## Grading
-
-The leaderboard ranks by homography reprojection error (lower is better; shown inverted
-as a Homography Match Score on Kaggle itself — see the note above). Runtime is added
-afterward as a separate column, not folded into a combined score.
