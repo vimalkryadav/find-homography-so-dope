@@ -1,0 +1,6 @@
+# 330MB and over GitHub's 100MB per-file limit; data/ holds the same images unpacked
+comp.zip
+
+.playwright-mcp/
+__pycache__/
+*.pyc
